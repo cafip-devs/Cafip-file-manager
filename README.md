@@ -1,6 +1,6 @@
 # FileManager
 
-Microservicio NestJS para **subida de archivos** (firmas) y **generación de informes**.
+Microservicio NestJS para **subida de archivos** (firmas) y **generación de reportes**.
 
 - Documentación de la API con **Scalar** en `/docs`.
 - Misma estructura de proyecto que el módulo de presupuesto.
@@ -47,4 +47,4 @@ Por defecto el servidor corre en **http://localhost:3001** y la documentación e
 |--------|----------|--------------------------|
 | POST   | /firmas  | Subir firma (PDF)        |
 
-Los demás endpoints (p. ej. generación de informes) se irán añadiendo en este mismo servicio.
+Los demás endpoints (p. ej. generación de reportes) se irán añadiendo en este mismo servicio.

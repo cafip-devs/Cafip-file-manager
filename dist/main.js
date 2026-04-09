@@ -13,7 +13,7 @@ async function bootstrap() {
             bufferLogs: true,
             logger,
         });
-        const port = Number(process.env.PORT ?? 3001);
+        const port = Number(process.env.PORT ?? 3005);
         const baseUrl = process.env.API_BASE_URL ||
             process.env.APP_BASE_URL ||
             `http://localhost:${port}`;
@@ -27,7 +27,7 @@ async function bootstrap() {
         }));
         const config = new swagger_1.DocumentBuilder()
             .setTitle('FileManager API')
-            .setDescription('Microservicio de subida de archivos (firmas) y generación de informes')
+            .setDescription('Microservicio de subida de archivos (firmas) y generación de reportes')
             .setVersion('1.0')
             .addServer(baseUrl)
             .build();

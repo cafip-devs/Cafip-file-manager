@@ -10,7 +10,7 @@ exports.AppService = void 0;
 const common_1 = require("@nestjs/common");
 let AppService = class AppService {
     getHello() {
-        return 'FileManager API - Subida de archivos y generación de informes';
+        return 'FileManager API - Subida de archivos y generación de reportes';
     }
 };
 exports.AppService = AppService;

@@ -1,0 +1,306 @@
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { REPORTES_DATA_SOURCE } from '../../database/reportes-data-source.provider';
+
+@Injectable()
+export class ReportesRepository {
+  constructor(
+    @Inject(REPORTES_DATA_SOURCE)
+    private readonly dataSource: DataSource | null,
+  ) {}
+
+  async getLiquidacionPresupuestalReporte(
+    comprobanteId: number,
+    nit: string,
+    daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    if (!this.dataSource) {
+      throw new ServiceUnavailableException(
+        'La conexión a PostgreSQL no está configurada. Define PG_USER, PG_HOST, PG_NAME, PG_PASSWORD, PG_PORT o DATABASE_URL para consultar reportes.',
+      );
+    }
+
+    const normalizedNit = nit.replace(/\D/g, '');
+    if (!normalizedNit) {
+      throw new BadRequestException('No fue posible interpretar el NIT enviado.');
+    }
+
+    const sql = `
+      WITH comprobante_base AS (
+        SELECT
+          cp.id,
+          cp.numero_comprobante,
+          cp.fecha,
+          EXTRACT(YEAR FROM cp.fecha)::int AS vigencia,
+          regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') AS nit
+        FROM comprobante_presupuestal cp
+        WHERE cp.id = $1
+          AND regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') = $2
+      ),
+      firmas_ranked AS (
+        SELECT
+          aif.*,
+          row_number() OVER (
+            PARTITION BY aif.tipo_firma
+            ORDER BY aif.id DESC
+          ) AS rn
+        FROM asignacion_inicial_firma aif
+        JOIN comprobante_base cb
+          ON cb.id = aif.comprobante_id
+      ),
+      firmas_json AS (
+        SELECT jsonb_build_object(
+          'elaboradoPor',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'numeroDocumento', fr.numero_documento,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'ELABORADO' AND fr.rn = 1
+          ),
+          'revisadoPor',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'numeroDocumento', fr.numero_documento,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'REVISADO' AND fr.rn = 1
+          ),
+          'rector',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'numeroDocumento', fr.numero_documento,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'APROBADO' AND fr.rn = 1
+          )
+        ) AS firmas
+      ),
+      institucion_base AS (
+        SELECT
+          cb.nit,
+          ccip.institucion_educativa,
+          $3::text AS dane_pri,
+          ccip.email,
+          cep.municipio,
+          ccdp.departamento
+        FROM comprobante_base cb
+        LEFT JOIN LATERAL (
+          SELECT *
+          FROM catalogo_entidades_privada cep
+          WHERE regexp_replace(cep.nit_fse, '[^0-9]', '', 'g') = cb.nit
+          ORDER BY cep.id DESC
+          LIMIT 1
+        ) cep ON true
+        LEFT JOIN LATERAL (
+          SELECT *
+          FROM catalogo_correo_institucional_privada ccip
+          WHERE ccip.dane_pri = $3
+            AND COALESCE(ccip.estado, 'ACTIVO') = 'ACTIVO'
+          ORDER BY ccip.id DESC
+          LIMIT 1
+        ) ccip ON true
+        LEFT JOIN LATERAL (
+          SELECT ccdp.departamento
+          FROM catalogo_ciudades_departamentos_privada ccdp
+          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          ORDER BY ccdp.id DESC
+          LIMIT 1
+        ) ccdp ON true
+      ),
+      detalles_vigencia AS (
+        SELECT
+          cas.rubro_ingreso_id,
+          cas.rubro_gasto_id,
+          cas.valor::numeric(18,2) AS valor
+        FROM comprobante_asignacion_sede cas
+        JOIN comprobante_base cb
+          ON cas.comprobante_id = cb.id
+      ),
+      ingresos_base AS (
+        SELECT
+          cip.id AS rubro_id,
+          cip.cuenta,
+          cip.concepto,
+          cip.nivel,
+          SUM(dv.valor)::numeric(18,2) AS valor
+        FROM detalles_vigencia dv
+        JOIN catalogo_ingresos_publica cip
+          ON cip.id = dv.rubro_ingreso_id
+        JOIN comprobante_base cb
+          ON regexp_replace(cip.nit, '[^0-9]', '', 'g') = cb.nit
+        WHERE dv.rubro_ingreso_id IS NOT NULL
+        GROUP BY cip.id, cip.cuenta, cip.concepto, cip.nivel
+      ),
+      ingresos_totalizadoras_raw AS (
+        SELECT
+          array_to_string(parts[1:gs], '.') AS cuenta,
+          SUM(ib.valor)::numeric(18,2) AS valor
+        FROM ingresos_base ib
+        CROSS JOIN LATERAL (
+          SELECT regexp_split_to_array(ib.cuenta, '\\.') AS parts
+        ) p
+        CROSS JOIN LATERAL generate_series(1, array_length(parts, 1) - 1) gs
+        GROUP BY array_to_string(parts[1:gs], '.')
+      ),
+      ingresos_totalizadoras AS (
+        SELECT
+          NULL::int AS rubro_id,
+          itr.cuenta,
+          MAX(cip.concepto) AS concepto,
+          MAX(cip.nivel) AS nivel,
+          itr.valor
+        FROM ingresos_totalizadoras_raw itr
+        LEFT JOIN catalogo_ingresos_publica cip
+          ON cip.cuenta = itr.cuenta
+        GROUP BY itr.cuenta, itr.valor
+      ),
+      gastos_base AS (
+        SELECT
+          cgp.id AS rubro_id,
+          cgp.cuenta,
+          cgp.concepto,
+          cgp.nivel,
+          SUM(dv.valor)::numeric(18,2) AS valor
+        FROM detalles_vigencia dv
+        JOIN catalogo_gastos_publica cgp
+          ON cgp.id = dv.rubro_gasto_id
+        JOIN comprobante_base cb
+          ON regexp_replace(cgp.nit, '[^0-9]', '', 'g') = cb.nit
+        WHERE dv.rubro_gasto_id IS NOT NULL
+        GROUP BY cgp.id, cgp.cuenta, cgp.concepto, cgp.nivel
+      ),
+      gastos_totalizadoras_raw AS (
+        SELECT
+          array_to_string(parts[1:gs], '.') AS cuenta,
+          SUM(gb.valor)::numeric(18,2) AS valor
+        FROM gastos_base gb
+        CROSS JOIN LATERAL (
+          SELECT regexp_split_to_array(gb.cuenta, '\\.') AS parts
+        ) p
+        CROSS JOIN LATERAL generate_series(1, array_length(parts, 1) - 1) gs
+        GROUP BY array_to_string(parts[1:gs], '.')
+      ),
+      gastos_totalizadoras AS (
+        SELECT
+          NULL::int AS rubro_id,
+          gtr.cuenta,
+          MAX(cgp.concepto) AS concepto,
+          MAX(cgp.nivel) AS nivel,
+          gtr.valor
+        FROM gastos_totalizadoras_raw gtr
+        LEFT JOIN catalogo_gastos_publica cgp
+          ON cgp.cuenta = gtr.cuenta
+        GROUP BY gtr.cuenta, gtr.valor
+      )
+      SELECT jsonb_build_object(
+        'comprobante', jsonb_build_object(
+          'id', cb.id,
+          'numeroComprobante', cb.numero_comprobante,
+          'fecha', cb.fecha,
+          'vigencia', cb.vigencia,
+          'nit', cb.nit
+        ),
+        'institucion', jsonb_build_object(
+          'institucionEducativa', ib.institucion_educativa,
+          'nit', ib.nit,
+          'danePri', ib.dane_pri,
+          'email', ib.email,
+          'municipio', ib.municipio,
+          'departamento', ib.departamento
+        ),
+        'firmas', COALESCE(fj.firmas, '{}'::jsonb),
+        'ingresos', jsonb_build_object(
+          'rubros', COALESCE((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'rubroId', i.rubro_id,
+                'cuenta', i.cuenta,
+                'concepto', i.concepto,
+                'nivel', i.nivel,
+                'valor', i.valor,
+                'ingresosProyectados', round((i.valor / 10.0)::numeric, 2)
+              )
+              ORDER BY i.cuenta
+            )
+            FROM ingresos_base i
+          ), '[]'::jsonb),
+          'totalizadoras', COALESCE((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'rubroId', it.rubro_id,
+                'cuenta', it.cuenta,
+                'concepto', it.concepto,
+                'nivel', it.nivel,
+                'valor', it.valor,
+                'ingresosProyectados', round((it.valor / 10.0)::numeric, 2)
+              )
+              ORDER BY it.cuenta
+            )
+            FROM ingresos_totalizadoras it
+          ), '[]'::jsonb)
+        ),
+        'gastos', jsonb_build_object(
+          'rubros', COALESCE((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'rubroId', g.rubro_id,
+                'cuenta', g.cuenta,
+                'concepto', g.concepto,
+                'nivel', g.nivel,
+                'valor', g.valor,
+                'ingresosProyectados', round((g.valor / 10.0)::numeric, 2)
+              )
+              ORDER BY g.cuenta
+            )
+            FROM gastos_base g
+          ), '[]'::jsonb),
+          'totalizadoras', COALESCE((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'rubroId', gt.rubro_id,
+                'cuenta', gt.cuenta,
+                'concepto', gt.concepto,
+                'nivel', gt.nivel,
+                'valor', gt.valor,
+                'ingresosProyectados', round((gt.valor / 10.0)::numeric, 2)
+              )
+              ORDER BY gt.cuenta
+            )
+            FROM gastos_totalizadoras gt
+          ), '[]'::jsonb)
+        ),
+        'generadoEn', now()
+      ) AS reporte
+      FROM comprobante_base cb
+      LEFT JOIN institucion_base ib ON true
+      LEFT JOIN firmas_json fj ON true
+    `;
+
+    const result = await this.dataSource.query(sql, [comprobanteId, normalizedNit, daneSede]);
+    const reporte = result?.[0]?.reporte;
+
+    if (!reporte) {
+      throw new NotFoundException(
+        `No se encontró el comprobante ${comprobanteId} para el NIT ${normalizedNit}.`,
+      );
+    }
+
+    return reporte as Record<string, unknown>;
+  }
+}
