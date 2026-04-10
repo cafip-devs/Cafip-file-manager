@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { GetCdpReporteDto } from './dto/get-cdp-reporte.dto';
 import { GetLiquidacionPresupuestalReporteDto } from './dto/get-liquidacion-presupuestal-reporte.dto';
 import { ReportesRepository } from './reportes.repository';
+import { numeroAPesosEnLetras } from './utils/numero-a-letras.util';
 
 @Injectable()
 export class ReportesService {
@@ -14,5 +16,28 @@ export class ReportesService {
       filters.nit,
       filters.daneSede,
     );
+  }
+
+  async getCdpReporte(
+    filters: GetCdpReporteDto,
+  ): Promise<Record<string, unknown>> {
+    const reporte = await this.reportesRepository.getCdpReporte(
+      filters.comprobanteId,
+      filters.nit,
+      filters.daneSede,
+    );
+
+    const cabecera = reporte.cabecera as Record<string, unknown> | undefined;
+    const totalCdpObjeto = cabecera?.totalCdpObjeto;
+
+    if (cabecera) {
+      cabecera.valorEnLetras = numeroAPesosEnLetras(totalCdpObjeto as
+        | number
+        | string
+        | null
+        | undefined);
+    }
+
+    return reporte;
   }
 }

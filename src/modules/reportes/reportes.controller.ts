@@ -6,6 +6,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { GetCdpReporteDto } from './dto/get-cdp-reporte.dto';
 import { GetLiquidacionPresupuestalReporteDto } from './dto/get-liquidacion-presupuestal-reporte.dto';
 import { ReportesService } from './reportes.service';
 
@@ -33,10 +34,40 @@ export class ReportesController {
     @Query('nit') nit: string,
     @Query('daneSede') daneSede: string,
   ): Promise<Record<string, unknown>> {
-    return this.reportesService.getLiquidacionPresupuestalReporte({
+    const filters: GetLiquidacionPresupuestalReporteDto = {
       comprobanteId,
       nit,
       daneSede,
-    });
+    };
+
+    return this.reportesService.getLiquidacionPresupuestalReporte(filters);
+  }
+
+  @Get('cdp/:comprobanteId')
+  @ApiOperation({
+    summary: 'Consultar reporte de CDP',
+    description:
+      'Devuelve el reporte de CDP por comprobante y NIT, incluyendo cabecera, detalles y firmas.',
+  })
+  @ApiParam({ name: 'comprobanteId', type: Number, example: 34 })
+  @ApiQuery({ name: 'nit', type: String, example: '806013548' })
+  @ApiQuery({ name: 'daneSede', type: String, example: '113052000431' })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+    },
+  })
+  getCdpReporte(
+    @Param('comprobanteId', ParseIntPipe) comprobanteId: number,
+    @Query('nit') nit: string,
+    @Query('daneSede') daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    const filters: GetCdpReporteDto = {
+      comprobanteId,
+      nit,
+      daneSede,
+    };
+
+    return this.reportesService.getCdpReporte(filters);
   }
 }

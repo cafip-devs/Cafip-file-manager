@@ -2,10 +2,10 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsInt, IsNotEmpty, IsString, Matches, Min } from 'class-validator';
 
-export class GetLiquidacionPresupuestalReporteDto {
+export class GetCdpReporteDto {
   @ApiProperty({
-    description: 'ID del comprobante de liquidacion presupuestal',
-    example: 45,
+    description: 'ID del comprobante CDP',
+    example: 40,
   })
   @Transform(({ value }) => Number(value))
   @IsInt()
