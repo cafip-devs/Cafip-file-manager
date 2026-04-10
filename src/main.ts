@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
@@ -38,15 +39,28 @@ async function bootstrap() {
         'Microservicio de subida de archivos (firmas) y generación de reportes',
       )
       .setVersion('1.0')
-      .addServer(baseUrl)
       .build();
 
     const document = SwaggerModule.createDocument(app, config);
 
+    app.use('/docs/openapi.json', (req: Request, res: Response) => {
+      const forwardedProto = req.headers['x-forwarded-proto'];
+      const protocol = Array.isArray(forwardedProto)
+        ? forwardedProto[0]
+        : forwardedProto || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      const currentBaseUrl = `${protocol}://${host}`;
+
+      res.json({
+        ...document,
+        servers: [{ url: currentBaseUrl }],
+      });
+    });
+
     app.use(
       '/docs',
       apiReference({
-        content: document,
+        url: '/docs/openapi.json',
       } as Parameters<typeof apiReference>[0]),
     );
 

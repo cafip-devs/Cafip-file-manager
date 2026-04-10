@@ -29,11 +29,22 @@ async function bootstrap() {
             .setTitle('FileManager API')
             .setDescription('Microservicio de subida de archivos (firmas) y generación de reportes')
             .setVersion('1.0')
-            .addServer(baseUrl)
             .build();
         const document = swagger_1.SwaggerModule.createDocument(app, config);
+        app.use('/docs/openapi.json', (req, res) => {
+            const forwardedProto = req.headers['x-forwarded-proto'];
+            const protocol = Array.isArray(forwardedProto)
+                ? forwardedProto[0]
+                : forwardedProto || req.protocol;
+            const host = req.headers['x-forwarded-host'] || req.headers.host;
+            const currentBaseUrl = `${protocol}://${host}`;
+            res.json({
+                ...document,
+                servers: [{ url: currentBaseUrl }],
+            });
+        });
         app.use('/docs', (0, nestjs_api_reference_1.apiReference)({
-            content: document,
+            url: '/docs/openapi.json',
         }));
         app.enableCors({
             origin: [
