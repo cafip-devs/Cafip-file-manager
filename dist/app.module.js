@@ -13,6 +13,7 @@ const app_controller_1 = require("./app.controller");
 const app_service_1 = require("./app.service");
 const firmas_module_1 = require("./modules/firmas/firmas.module");
 const reportes_module_1 = require("./modules/reportes/reportes.module");
+const instituciones_module_1 = require("./modules/instituciones/instituciones.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -21,6 +22,7 @@ exports.AppModule = AppModule = __decorate([
         imports: [
             config_1.ConfigModule.forRoot({ isGlobal: true }),
             firmas_module_1.FirmasModule,
+            instituciones_module_1.InstitucionesModule,
             reportes_module_1.ReportesModule,
         ],
         controllers: [app_controller_1.AppController],
