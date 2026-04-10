@@ -94,27 +94,27 @@ export class ReportesRepository {
       institucion_base AS (
         SELECT
           cb.nit,
-          ccip.institucion_educativa,
-          $3::text AS dane_pri,
-          ccip.email,
+          COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion_educativa,
+          COALESCE(ccip.dane_pri, $3::text) AS dane_pri,
+          COALESCE(ccip.email, cep.email) AS email,
           cep.municipio,
           ccdp.departamento
         FROM comprobante_base cb
         LEFT JOIN LATERAL (
-          SELECT *
-          FROM catalogo_entidades_privada cep
-          WHERE regexp_replace(cep.nit_fse, '[^0-9]', '', 'g') = cb.nit
-          ORDER BY cep.id DESC
-          LIMIT 1
-        ) cep ON true
-        LEFT JOIN LATERAL (
-          SELECT *
+          SELECT ccip.institucion_educativa, ccip.dane_pri, ccip.email
           FROM catalogo_correo_institucional_privada ccip
           WHERE ccip.dane_pri = $3
             AND COALESCE(ccip.estado, 'ACTIVO') = 'ACTIVO'
           ORDER BY ccip.id DESC
           LIMIT 1
         ) ccip ON true
+        LEFT JOIN LATERAL (
+          SELECT cep.nombre_establecimiento, cep.email, cep.municipio
+          FROM catalogo_entidades_privada cep
+          WHERE regexp_replace(cep.nit_fse, '[^0-9]', '', 'g') = cb.nit
+          ORDER BY cep.id DESC
+          LIMIT 1
+        ) cep ON true
         LEFT JOIN LATERAL (
           SELECT ccdp.departamento
           FROM catalogo_ciudades_departamentos_privada ccdp
@@ -129,8 +129,12 @@ export class ReportesRepository {
           cas.rubro_gasto_id,
           cas.valor::numeric(18,2) AS valor
         FROM comprobante_asignacion_sede cas
+        JOIN comprobante_presupuestal cp
+          ON cp.id = cas.comprobante_id
         JOIN comprobante_base cb
-          ON cas.comprobante_id = cb.id
+          ON regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') = cb.nit
+         AND EXTRACT(YEAR FROM cp.fecha)::int = cb.vigencia
+        WHERE cp.estado = 'APROBADO'
       ),
       ingresos_base AS (
         SELECT
@@ -292,7 +296,193 @@ export class ReportesRepository {
       LEFT JOIN firmas_json fj ON true
     `;
 
-    const result = await this.dataSource.query(sql, [comprobanteId, normalizedNit, daneSede]);
+    const result = await this.dataSource.query(sql, [
+      comprobanteId,
+      normalizedNit,
+      daneSede,
+    ]);
+    const reporte = result?.[0]?.reporte;
+
+    if (!reporte) {
+      throw new NotFoundException(
+        `No se encontró el comprobante ${comprobanteId} para el NIT ${normalizedNit}.`,
+      );
+    }
+
+    return reporte as Record<string, unknown>;
+  }
+
+  async getCdpReporte(
+    comprobanteId: number,
+    nit: string,
+    daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    if (!this.dataSource) {
+      throw new ServiceUnavailableException(
+        'La conexión a PostgreSQL no está configurada. Define PG_USER, PG_HOST, PG_NAME, PG_PASSWORD, PG_PORT o DATABASE_URL para consultar reportes.',
+      );
+    }
+
+    const normalizedNit = nit.replace(/\D/g, '');
+    if (!normalizedNit) {
+      throw new BadRequestException('No fue posible interpretar el NIT enviado.');
+    }
+
+    const sql = `
+      WITH cdp_base AS (
+        SELECT
+          c.id,
+          c.numero_comprobante,
+          c.fecha,
+          c.institucion_id,
+          c.estado,
+          c.objeto
+        FROM cdp c
+        WHERE c.id = $1
+          AND regexp_replace(c.institucion_id::text, '[^0-9]', '', 'g') = $2
+      ),
+      firmas_ranked AS (
+        SELECT
+          cf.*,
+          row_number() OVER (
+            PARTITION BY cf.tipo_firma
+            ORDER BY cf.id DESC
+          ) AS rn
+        FROM cdp_firma cf
+        JOIN cdp_base cb
+          ON cb.id = cf.cdp_id
+      ),
+      firmas_json AS (
+        SELECT jsonb_build_object(
+          'elaboradoPor',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'ELABORADO' AND fr.rn = 1
+          ),
+          'revisadoPor',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'REVISADO' AND fr.rn = 1
+          ),
+          'rector',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'APROBADO' AND fr.rn = 1
+          )
+        ) AS firmas
+      ),
+      institucion_base AS (
+        SELECT
+          regexp_replace(cb.institucion_id::text, '[^0-9]', '', 'g') AS nit,
+          COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion_educativa,
+          COALESCE(ccip.dane_pri, $3::text) AS dane_pri,
+          COALESCE(ccip.email, cep.email) AS email,
+          cep.municipio,
+          ccdp.departamento
+        FROM cdp_base cb
+        LEFT JOIN LATERAL (
+          SELECT ccip.institucion_educativa, ccip.dane_pri, ccip.email
+          FROM catalogo_correo_institucional_privada ccip
+          WHERE ccip.dane_pri = $3
+            AND COALESCE(ccip.estado, 'ACTIVO') = 'ACTIVO'
+          ORDER BY ccip.id DESC
+          LIMIT 1
+        ) ccip ON true
+        LEFT JOIN LATERAL (
+          SELECT cep.nombre_establecimiento, cep.email, cep.municipio
+          FROM catalogo_entidades_privada cep
+          WHERE regexp_replace(cep.nit_fse, '[^0-9]', '', 'g') =
+            regexp_replace(cb.institucion_id::text, '[^0-9]', '', 'g')
+          ORDER BY cep.id DESC
+          LIMIT 1
+        ) cep ON true
+        LEFT JOIN LATERAL (
+          SELECT ccdp.departamento
+          FROM catalogo_ciudades_departamentos_privada ccdp
+          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          ORDER BY ccdp.id DESC
+          LIMIT 1
+        ) ccdp ON true
+      ),
+      detalles_base AS (
+        SELECT
+          d.id,
+          f.nombre_fuente AS fuente_financiacion,
+          d.rubro_gasto_id,
+          g.cuenta AS rubro_cuenta,
+          g.concepto AS rubro_concepto,
+          d.valor_cdp::numeric(18,2) AS valor_cdp_detalle
+        FROM cdp_detalle d
+        JOIN cdp_base cb
+          ON cb.id = d.cdp_id
+        LEFT JOIN catalogo_fuentes_financiacion_publica f
+          ON f.id = d.fuente_financiacion_id
+        LEFT JOIN catalogo_gastos_publica g
+          ON g.id = d.rubro_gasto_id
+      ),
+      totales AS (
+        SELECT
+          COALESCE(SUM(valor_cdp_detalle), 0)::numeric(18,2) AS total_cdp_objeto
+        FROM detalles_base
+      )
+      SELECT jsonb_build_object(
+        'cabecera', jsonb_build_object(
+          'cdpId', cb.id,
+          'numeroComprobante', cb.numero_comprobante,
+          'fecha', cb.fecha,
+          'objeto', cb.objeto,
+          'institucion', ib.institucion_educativa,
+          'nit', ib.nit,
+          'dane', ib.dane_pri,
+          'email', ib.email,
+          'municipio', ib.municipio,
+          'departamento', ib.departamento,
+          'totalCdpObjeto', t.total_cdp_objeto,
+          'valorEnLetras', NULL
+        ),
+        'firmas', COALESCE(fj.firmas, '{}'::jsonb),
+        'detalles', COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'detalleId', d.id,
+              'fuenteFinanciacion', d.fuente_financiacion,
+              'rubroId', d.rubro_gasto_id,
+              'rubroCuenta', d.rubro_cuenta,
+              'rubroConcepto', d.rubro_concepto,
+              'valorCdpDetalle', d.valor_cdp_detalle
+            )
+            ORDER BY d.id
+          )
+          FROM detalles_base d
+        ), '[]'::jsonb),
+        'generadoEn', now()
+      ) AS reporte
+      FROM cdp_base cb
+      LEFT JOIN institucion_base ib ON true
+      LEFT JOIN firmas_json fj ON true
+      LEFT JOIN totales t ON true
+    `;
+
+    const result = await this.dataSource.query(sql, [
+      comprobanteId,
+      normalizedNit,
+      daneSede,
+    ]);
     const reporte = result?.[0]?.reporte;
 
     if (!reporte) {
