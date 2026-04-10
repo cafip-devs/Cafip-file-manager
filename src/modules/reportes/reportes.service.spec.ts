@@ -7,6 +7,7 @@ describe('ReportesService', () => {
   const reportesRepository = {
     getLiquidacionPresupuestalReporte: jest.fn(),
     getCdpReporte: jest.fn(),
+    getCrpReporte: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -71,6 +72,34 @@ describe('ReportesService', () => {
       cabecera: {
         ...expected.cabecera,
         valorEnLetras: 'veinticinco millones pesos con 00/100 m/cte',
+      },
+    });
+  });
+
+  it('delegates the crp reporte query to the repository', async () => {
+    const expected = {
+      cabecera: { crpId: 43, nit: '806013548', totalCrp: '1000000.00' },
+      detalles: [],
+      firmas: {},
+    };
+    reportesRepository.getCrpReporte.mockResolvedValue(expected);
+
+    const result = await service.getCrpReporte({
+      comprobanteId: 43,
+      nit: '806013548',
+      daneSede: '113052000431',
+    });
+
+    expect(reportesRepository.getCrpReporte).toHaveBeenCalledWith(
+      43,
+      '806013548',
+      '113052000431',
+    );
+    expect(result).toEqual({
+      ...expected,
+      cabecera: {
+        ...expected.cabecera,
+        valorEnLetras: 'un millon pesos con 00/100 m/cte',
       },
     });
   });
