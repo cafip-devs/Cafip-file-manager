@@ -27,7 +27,7 @@ describe('ReportesService', () => {
 
   it('delegates the liquidacion reporte query to the repository', async () => {
     const expected = {
-      comprobante: { id: 45, nit: '123456789' },
+      cabecera: { id: 45, nit: '123456789' },
       ingresos: { rubros: [] },
       gastos: { rubros: [] },
       firmas: {},
