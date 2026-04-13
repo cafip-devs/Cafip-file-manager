@@ -55,10 +55,10 @@ export class ReportesRepository {
           ON cb.id = aif.comprobante_id
       ),
       firmas_json AS (
-        SELECT jsonb_build_object(
+        SELECT json_build_object(
           'elaboradoPor',
           (
-            SELECT jsonb_build_object(
+            SELECT json_build_object(
               'nombre', fr.nombre,
               'cargo', fr.cargo,
               'numeroDocumento', fr.numero_documento,
@@ -69,7 +69,7 @@ export class ReportesRepository {
           ),
           'revisadoPor',
           (
-            SELECT jsonb_build_object(
+            SELECT json_build_object(
               'nombre', fr.nombre,
               'cargo', fr.cargo,
               'numeroDocumento', fr.numero_documento,
@@ -80,7 +80,7 @@ export class ReportesRepository {
           ),
           'rector',
           (
-            SELECT jsonb_build_object(
+            SELECT json_build_object(
               'nombre', fr.nombre,
               'cargo', fr.cargo,
               'numeroDocumento', fr.numero_documento,
@@ -212,84 +212,49 @@ export class ReportesRepository {
           ON cgp.cuenta = gtr.cuenta
         GROUP BY gtr.cuenta, gtr.valor
       )
-      SELECT jsonb_build_object(
-        'comprobante', jsonb_build_object(
+      SELECT json_build_object(
+        'cabecera', json_build_object(
           'id', cb.id,
           'numeroComprobante', cb.numero_comprobante,
           'fecha', cb.fecha,
           'vigencia', cb.vigencia,
-          'nit', cb.nit
-        ),
-        'institucion', jsonb_build_object(
+          'nit', cb.nit,
           'institucionEducativa', ib.institucion_educativa,
-          'nit', ib.nit,
           'danePri', ib.dane_pri,
           'email', ib.email,
           'municipio', ib.municipio,
-          'departamento', ib.departamento
+          'departamento', ib.departamento,
+          'generadoEn', now()
         ),
-        'firmas', COALESCE(fj.firmas, '{}'::jsonb),
-        'ingresos', jsonb_build_object(
-          'rubros', COALESCE((
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'rubroId', i.rubro_id,
-                'cuenta', i.cuenta,
-                'concepto', i.concepto,
-                'nivel', i.nivel,
-                'valor', i.valor,
-                'ingresosProyectados', round((i.valor / 10.0)::numeric, 2)
-              )
-              ORDER BY i.cuenta
+        'ingresos', COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'rubroId', it.rubro_id,
+              'cuenta', it.cuenta,
+              'concepto', it.concepto,
+              'nivel', it.nivel,
+              'total', it.valor,
+              'ingresosProyectados', round((it.valor / 10.0)::numeric, 2)
             )
-            FROM ingresos_base i
-          ), '[]'::jsonb),
-          'totalizadoras', COALESCE((
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'rubroId', it.rubro_id,
-                'cuenta', it.cuenta,
-                'concepto', it.concepto,
-                'nivel', it.nivel,
-                'valor', it.valor,
-                'ingresosProyectados', round((it.valor / 10.0)::numeric, 2)
-              )
-              ORDER BY it.cuenta
+            ORDER BY it.cuenta
+          )
+          FROM ingresos_totalizadoras it
+        ), '[]'::json),
+        'gastos', COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'rubroId', gt.rubro_id,
+              'cuenta', gt.cuenta,
+              'concepto', gt.concepto,
+              'nivel', gt.nivel,
+              'total', gt.valor,
+              'ingresosProyectados', round((gt.valor / 10.0)::numeric, 2)
             )
-            FROM ingresos_totalizadoras it
-          ), '[]'::jsonb)
-        ),
-        'gastos', jsonb_build_object(
-          'rubros', COALESCE((
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'rubroId', g.rubro_id,
-                'cuenta', g.cuenta,
-                'concepto', g.concepto,
-                'nivel', g.nivel,
-                'valor', g.valor,
-                'ingresosProyectados', round((g.valor / 10.0)::numeric, 2)
-              )
-              ORDER BY g.cuenta
-            )
-            FROM gastos_base g
-          ), '[]'::jsonb),
-          'totalizadoras', COALESCE((
-            SELECT jsonb_agg(
-              jsonb_build_object(
-                'rubroId', gt.rubro_id,
-                'cuenta', gt.cuenta,
-                'concepto', gt.concepto,
-                'nivel', gt.nivel,
-                'valor', gt.valor,
-                'ingresosProyectados', round((gt.valor / 10.0)::numeric, 2)
-              )
-              ORDER BY gt.cuenta
-            )
-            FROM gastos_totalizadoras gt
-          ), '[]'::jsonb)
-        ),
-        'generadoEn', now()
+            ORDER BY gt.cuenta
+          )
+          FROM gastos_totalizadoras gt
+        ), '[]'::json),
+        'firmas', COALESCE(fj.firmas, '{}'::json)
       ) AS reporte
       FROM comprobante_base cb
       LEFT JOIN institucion_base ib ON true
