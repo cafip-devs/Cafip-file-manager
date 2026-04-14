@@ -136,81 +136,47 @@ export class ReportesRepository {
          AND EXTRACT(YEAR FROM cp.fecha)::int = cb.vigencia
         WHERE cp.estado = 'APROBADO'
       ),
-      ingresos_base AS (
+      ingresos_movimientos AS (
+        SELECT
+          dv.rubro_ingreso_id,
+          SUM(dv.valor)::numeric(18,2) AS valor
+        FROM detalles_vigencia dv
+        WHERE dv.rubro_ingreso_id IS NOT NULL
+        GROUP BY dv.rubro_ingreso_id
+      ),
+      ingresos_catalogo AS (
         SELECT
           cip.id AS rubro_id,
           cip.cuenta,
-          cip.concepto,
+          COALESCE(NULLIF(trim(cip.concepto), ''), cip.cuenta) AS concepto,
           cip.nivel,
-          SUM(dv.valor)::numeric(18,2) AS valor
-        FROM detalles_vigencia dv
-        JOIN catalogo_ingresos_publica cip
-          ON cip.id = dv.rubro_ingreso_id
+          COALESCE(im.valor, 0)::numeric(18,2) AS total
+        FROM catalogo_ingresos_publica cip
         JOIN comprobante_base cb
           ON regexp_replace(cip.nit, '[^0-9]', '', 'g') = cb.nit
-        WHERE dv.rubro_ingreso_id IS NOT NULL
-        GROUP BY cip.id, cip.cuenta, cip.concepto, cip.nivel
+        LEFT JOIN ingresos_movimientos im
+          ON im.rubro_ingreso_id = cip.id
       ),
-      ingresos_totalizadoras_raw AS (
+      gastos_movimientos AS (
         SELECT
-          array_to_string(parts[1:gs], '.') AS cuenta,
-          SUM(ib.valor)::numeric(18,2) AS valor
-        FROM ingresos_base ib
-        CROSS JOIN LATERAL (
-          SELECT regexp_split_to_array(ib.cuenta, '\\.') AS parts
-        ) p
-        CROSS JOIN LATERAL generate_series(1, array_length(parts, 1) - 1) gs
-        GROUP BY array_to_string(parts[1:gs], '.')
+          dv.rubro_gasto_id,
+          SUM(dv.valor)::numeric(18,2) AS valor
+        FROM detalles_vigencia dv
+        WHERE dv.rubro_gasto_id IS NOT NULL
+        GROUP BY dv.rubro_gasto_id
       ),
-      ingresos_totalizadoras AS (
-        SELECT
-          NULL::int AS rubro_id,
-          itr.cuenta,
-          MAX(cip.concepto) AS concepto,
-          MAX(cip.nivel) AS nivel,
-          itr.valor
-        FROM ingresos_totalizadoras_raw itr
-        LEFT JOIN catalogo_ingresos_publica cip
-          ON cip.cuenta = itr.cuenta
-        GROUP BY itr.cuenta, itr.valor
-      ),
-      gastos_base AS (
+      gastos_catalogo AS (
         SELECT
           cgp.id AS rubro_id,
           cgp.cuenta,
-          cgp.concepto,
+          COALESCE(NULLIF(trim(cgp.concepto), ''), cgp.cuenta) AS concepto,
           cgp.nivel,
-          SUM(dv.valor)::numeric(18,2) AS valor
-        FROM detalles_vigencia dv
-        JOIN catalogo_gastos_publica cgp
-          ON cgp.id = dv.rubro_gasto_id
+          COALESCE(gm.valor, 0)::numeric(18,2) AS total
+        FROM catalogo_gastos_publica cgp
         JOIN comprobante_base cb
           ON regexp_replace(cgp.nit, '[^0-9]', '', 'g') = cb.nit
-        WHERE dv.rubro_gasto_id IS NOT NULL
-        GROUP BY cgp.id, cgp.cuenta, cgp.concepto, cgp.nivel
-      ),
-      gastos_totalizadoras_raw AS (
-        SELECT
-          array_to_string(parts[1:gs], '.') AS cuenta,
-          SUM(gb.valor)::numeric(18,2) AS valor
-        FROM gastos_base gb
-        CROSS JOIN LATERAL (
-          SELECT regexp_split_to_array(gb.cuenta, '\\.') AS parts
-        ) p
-        CROSS JOIN LATERAL generate_series(1, array_length(parts, 1) - 1) gs
-        GROUP BY array_to_string(parts[1:gs], '.')
-      ),
-      gastos_totalizadoras AS (
-        SELECT
-          NULL::int AS rubro_id,
-          gtr.cuenta,
-          MAX(cgp.concepto) AS concepto,
-          MAX(cgp.nivel) AS nivel,
-          gtr.valor
-        FROM gastos_totalizadoras_raw gtr
-        LEFT JOIN catalogo_gastos_publica cgp
-          ON cgp.cuenta = gtr.cuenta
-        GROUP BY gtr.cuenta, gtr.valor
+        LEFT JOIN gastos_movimientos gm
+          ON gm.rubro_gasto_id = cgp.id
       )
       SELECT json_build_object(
         'cabecera', json_build_object(
@@ -229,30 +195,28 @@ export class ReportesRepository {
         'ingresos', COALESCE((
           SELECT json_agg(
             json_build_object(
-              'rubroId', it.rubro_id,
-              'cuenta', it.cuenta,
-              'concepto', it.concepto,
-              'nivel', it.nivel,
-              'total', it.valor,
-              'ingresosProyectados', round((it.valor / 10.0)::numeric, 2)
+              'rubroId', ic.rubro_id,
+              'cuenta', ic.cuenta,
+              'concepto', ic.concepto,
+              'total', ic.total,
+              'ingresosProyectados', round((ic.total / 10.0)::numeric, 2)
             )
-            ORDER BY it.cuenta
+            ORDER BY ic.cuenta
           )
-          FROM ingresos_totalizadoras it
+          FROM ingresos_catalogo ic
         ), '[]'::json),
         'gastos', COALESCE((
           SELECT json_agg(
             json_build_object(
-              'rubroId', gt.rubro_id,
-              'cuenta', gt.cuenta,
-              'concepto', gt.concepto,
-              'nivel', gt.nivel,
-              'total', gt.valor,
-              'ingresosProyectados', round((gt.valor / 10.0)::numeric, 2)
+              'rubroId', gc.rubro_id,
+              'cuenta', gc.cuenta,
+              'concepto', gc.concepto,
+              'total', gc.total,
+              'ingresosProyectados', round((gc.total / 10.0)::numeric, 2)
             )
-            ORDER BY gt.cuenta
+            ORDER BY gc.cuenta
           )
-          FROM gastos_totalizadoras gt
+          FROM gastos_catalogo gc
         ), '[]'::json),
         'firmas', COALESCE(fj.firmas, '{}'::json)
       ) AS reporte

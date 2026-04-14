@@ -28,8 +28,8 @@ describe('ReportesService', () => {
   it('delegates the liquidacion reporte query to the repository', async () => {
     const expected = {
       cabecera: { id: 45, nit: '123456789' },
-      ingresos: { rubros: [] },
-      gastos: { rubros: [] },
+      ingresos: [],
+      gastos: [],
       firmas: {},
     };
     reportesRepository.getLiquidacionPresupuestalReporte.mockResolvedValue(
