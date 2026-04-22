@@ -7,6 +7,7 @@ describe('ReportesService', () => {
   const reportesRepository = {
     getAdicionReporte: jest.fn(),
     getLiquidacionPresupuestalReporte: jest.fn(),
+    getReduccionReporte: jest.fn(),
     getCdpReporte: jest.fn(),
     getCrpReporte: jest.fn(),
   };
@@ -88,6 +89,42 @@ describe('ReportesService', () => {
         ...expected.cabecera,
         fecha: '29 de marzo del 2026',
       },
+    });
+  });
+
+  it('delegates the reduccion reporte query to the repository', async () => {
+    const expected = {
+      cabecera: {
+        reduccionId: 2,
+        nit: '806013548',
+        totalReduccion: '1500000.00',
+        fecha: '2026-03-29T19:00:00',
+      },
+      detalles: [],
+      firmas: {},
+      generadoEn: '2026-04-22T11:00:00',
+    };
+    reportesRepository.getReduccionReporte.mockResolvedValue(expected);
+
+    const result = await service.getReduccionReporte({
+      comprobanteId: 2,
+      nit: '806013548',
+      daneSede: '113052000431',
+    });
+
+    expect(reportesRepository.getReduccionReporte).toHaveBeenCalledWith(
+      2,
+      '806013548',
+      '113052000431',
+    );
+    expect(result).toEqual({
+      ...expected,
+      cabecera: {
+        ...expected.cabecera,
+        fecha: '29 de marzo del 2026',
+        valorEnLetras: 'UN MILLON QUINIENTOS MIL PESOS',
+      },
+      generadoEn: '22 de abril del 2026',
     });
   });
 

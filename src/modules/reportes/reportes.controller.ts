@@ -10,6 +10,7 @@ import { GetAdicionReporteDto } from './dto/get-adicion-reporte.dto';
 import { GetCdpReporteDto } from './dto/get-cdp-reporte.dto';
 import { GetCrpReporteDto } from './dto/get-crp-reporte.dto';
 import { GetLiquidacionPresupuestalReporteDto } from './dto/get-liquidacion-presupuestal-reporte.dto';
+import { GetReduccionReporteDto } from './dto/get-reduccion-reporte.dto';
 import { ReportesService } from './reportes.service';
 
 @ApiTags('Reportes')
@@ -71,6 +72,34 @@ export class ReportesController {
     };
 
     return this.reportesService.getLiquidacionPresupuestalReporte(filters);
+  }
+
+  @Get('reduccion/:comprobanteId')
+  @ApiOperation({
+    summary: 'Consultar reporte de reduccion',
+    description:
+      'Devuelve el reporte de reduccion por comprobante y NIT, incluyendo cabecera, detalles y firma del rector.',
+  })
+  @ApiParam({ name: 'comprobanteId', type: Number, example: 17 })
+  @ApiQuery({ name: 'nit', type: String, example: '806013548' })
+  @ApiQuery({ name: 'daneSede', type: String, example: '113052000431' })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+    },
+  })
+  getReduccionReporte(
+    @Param('comprobanteId', ParseIntPipe) comprobanteId: number,
+    @Query('nit') nit: string,
+    @Query('daneSede') daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    const filters: GetReduccionReporteDto = {
+      comprobanteId,
+      nit,
+      daneSede,
+    };
+
+    return this.reportesService.getReduccionReporte(filters);
   }
 
   @Get('cdp/:comprobanteId')
