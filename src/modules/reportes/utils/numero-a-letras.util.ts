@@ -145,7 +145,10 @@ export function numeroAPesosEnLetras(value: number | string | null | undefined):
   const entero = Math.floor(numericValue);
   const centavos = Math.round((numericValue - entero) * 100);
   const letras = convertirEntero(entero);
-  const centavosTexto = String(centavos).padStart(2, '0');
 
-  return `${letras} pesos con ${centavosTexto}/100 m/cte`;
+  if (centavos === 0) {
+    return `${letras} pesos`;
+  }
+
+  return `${letras} pesos con ${convertirEntero(centavos)} centavos`;
 }

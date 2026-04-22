@@ -6,6 +6,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { GetAdicionReporteDto } from './dto/get-adicion-reporte.dto';
 import { GetCdpReporteDto } from './dto/get-cdp-reporte.dto';
 import { GetCrpReporteDto } from './dto/get-crp-reporte.dto';
 import { GetLiquidacionPresupuestalReporteDto } from './dto/get-liquidacion-presupuestal-reporte.dto';
@@ -15,6 +16,34 @@ import { ReportesService } from './reportes.service';
 @Controller('reportes')
 export class ReportesController {
   constructor(private readonly reportesService: ReportesService) {}
+
+  @Get('adicion/:comprobanteId')
+  @ApiOperation({
+    summary: 'Consultar reporte de adicion',
+    description:
+      'Devuelve el reporte de adicion por comprobante y NIT, incluyendo cabecera, detalles y firma del rector.',
+  })
+  @ApiParam({ name: 'comprobanteId', type: Number, example: 1 })
+  @ApiQuery({ name: 'nit', type: String, example: '806013548' })
+  @ApiQuery({ name: 'daneSede', type: String, example: '113052000431' })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+    },
+  })
+  getAdicionReporte(
+    @Param('comprobanteId', ParseIntPipe) comprobanteId: number,
+    @Query('nit') nit: string,
+    @Query('daneSede') daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    const filters: GetAdicionReporteDto = {
+      comprobanteId,
+      nit,
+      daneSede,
+    };
+
+    return this.reportesService.getAdicionReporte(filters);
+  }
 
   @Get('liquidacion-presupuestal/:comprobanteId')
   @ApiOperation({
