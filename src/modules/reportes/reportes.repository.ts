@@ -15,6 +15,217 @@ export class ReportesRepository {
     private readonly dataSource: DataSource | null,
   ) {}
 
+  async getAdicionReporte(
+    comprobanteId: number,
+    nit: string,
+    daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    if (!this.dataSource) {
+      throw new ServiceUnavailableException(
+        'La conexión a PostgreSQL no está configurada. Define PG_USER, PG_HOST, PG_NAME, PG_PASSWORD, PG_PORT o DATABASE_URL para consultar reportes.',
+      );
+    }
+
+    const normalizedNit = nit.replace(/\D/g, '');
+    if (!normalizedNit) {
+      throw new BadRequestException('No fue posible interpretar el NIT enviado.');
+    }
+
+    const sql = `
+      WITH adicion_base AS (
+        SELECT
+          ca.id,
+          ca.numero_comprobante,
+          ca.fecha,
+          ca.tipo_documento_id,
+          ca.acto_administrativo_id,
+          ca.descripcion,
+          ca.estado,
+          regexp_replace(ca.institucion::text, '[^0-9]', '', 'g') AS nit
+        FROM comprobante_adicion ca
+        WHERE ca.id = $1
+          AND regexp_replace(ca.institucion::text, '[^0-9]', '', 'g') = $2
+      ),
+      firmas_ranked AS (
+        SELECT
+          af.*,
+          row_number() OVER (
+            PARTITION BY af.tipo_firma
+            ORDER BY af.id DESC
+          ) AS rn
+        FROM adicion_firma af
+        JOIN adicion_base ab
+          ON ab.id = af.comprobante_id
+      ),
+      firmas_json AS (
+        SELECT jsonb_build_object(
+          'rector',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'APROBADO' AND fr.rn = 1
+          )
+        ) AS firmas
+      ),
+      institucion_base AS (
+        SELECT
+          ab.nit,
+          COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion,
+          COALESCE(ccip.dane_pri, $3::text) AS dane,
+          COALESCE(ccip.email, cep.email) AS email,
+          cep.municipio,
+          ccdp.departamento
+        FROM adicion_base ab
+        LEFT JOIN LATERAL (
+          SELECT ccip.institucion_educativa, ccip.dane_pri, ccip.email
+          FROM catalogo_correo_institucional_privada ccip
+          WHERE ccip.dane_pri = $3
+            AND COALESCE(ccip.estado, 'ACTIVO') = 'ACTIVO'
+          ORDER BY ccip.id DESC
+          LIMIT 1
+        ) ccip ON true
+        LEFT JOIN LATERAL (
+          SELECT cep.nombre_establecimiento, cep.email, cep.municipio
+          FROM catalogo_entidades_privada cep
+          WHERE regexp_replace(cep.nit_fse, '[^0-9]', '', 'g') = ab.nit
+          ORDER BY cep.id DESC
+          LIMIT 1
+        ) cep ON true
+        LEFT JOIN LATERAL (
+          SELECT ccdp.departamento
+          FROM catalogo_ciudades_departamentos_privada ccdp
+          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          ORDER BY ccdp.id DESC
+          LIMIT 1
+        ) ccdp ON true
+      ),
+      tipo_documento_base AS (
+        SELECT
+          ab.id,
+          cds.documento_soporte AS tipo_documento_nombre
+        FROM adicion_base ab
+        LEFT JOIN catalogo_documentos_soporte_publica cds
+          ON cds.id = ab.tipo_documento_id
+      ),
+      acto_base AS (
+        SELECT
+          ab.id,
+          trim(
+            concat_ws(
+              ' ',
+              nullif(trim(cap.tipo_documento), ''),
+              CASE
+                WHEN nullif(trim(aa.numero_acto), '') IS NULL THEN NULL
+                WHEN cap.tipo_documento ~* '\\mno\\.?\\M'
+                  OR aa.numero_acto ~* '\\mno\\.?\\M'
+                THEN trim(aa.numero_acto)
+                ELSE concat('No. ', trim(aa.numero_acto))
+              END,
+              CASE
+                WHEN aa.fecha IS NULL THEN NULL
+                ELSE concat('del ', to_char(aa.fecha, 'DD/MM/YYYY'))
+              END
+            )
+          ) AS acto_administrativo
+        FROM adicion_base ab
+        LEFT JOIN acto_administrativo aa
+          ON aa.id = ab.acto_administrativo_id
+        LEFT JOIN catalogo_actos_administrativos_privada cap
+          ON cap.id = aa.tipo_acto_administrativo_id
+      ),
+      detalles_base AS (
+        SELECT
+          d.id,
+          ff.nombre_fuente AS fuente_financiacion,
+          COALESCE(ci.id, cg.id) AS rubro_id,
+          COALESCE(ci.cuenta, cg.cuenta) AS rubro_cuenta,
+          COALESCE(ci.concepto, cg.concepto) AS rubro_concepto,
+          CASE
+            WHEN d.rubro_ingreso_id IS NOT NULL THEN 'INGRESO'
+            ELSE 'GASTO'
+          END AS tipo,
+          d.valor::numeric(18,2) AS valor_adicion
+        FROM comprobante_adicion_sede d
+        JOIN adicion_base ab
+          ON ab.id = d.comprobante_id
+        LEFT JOIN catalogo_fuentes_financiacion_publica ff
+          ON ff.id = d.fuente_financiacion_id
+        LEFT JOIN catalogo_ingresos_publica ci
+          ON ci.id = d.rubro_ingreso_id
+        LEFT JOIN catalogo_gastos_publica cg
+          ON cg.id = d.rubro_gasto_id
+      ),
+      totales AS (
+        SELECT
+          COALESCE(SUM(valor_adicion), 0)::numeric(18,2) AS total_adicion
+        FROM detalles_base
+      )
+      SELECT json_build_object(
+        'cabecera', json_build_object(
+          'adicionId', ab.id,
+          'numeroComprobante', ab.numero_comprobante,
+          'fecha', ab.fecha,
+          'institucion', ib.institucion,
+          'nit', ib.nit,
+          'dane', ib.dane,
+          'email', ib.email,
+          'municipio', ib.municipio,
+          'departamento', ib.departamento,
+          'tipoDocumentoId', ab.tipo_documento_id,
+          'tipoDocumentoNombre', tdb.tipo_documento_nombre,
+          'actoAdministrativoId', ab.acto_administrativo_id,
+          'actoAdministrativo', ato.acto_administrativo,
+          'descripcion', ab.descripcion,
+          'estado', ab.estado,
+          'totalAdicion', t.total_adicion,
+          'valorEnLetras', NULL
+        ),
+        'detalles', COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'detalleId', d.id,
+              'fuenteFinanciacion', d.fuente_financiacion,
+              'rubroId', d.rubro_id,
+              'rubroCuenta', d.rubro_cuenta,
+              'rubroConcepto', d.rubro_concepto,
+              'tipo', d.tipo,
+              'valorAdicion', d.valor_adicion
+            )
+            ORDER BY d.id
+          )
+          FROM detalles_base d
+        ), '[]'::json),
+        'firmas', COALESCE(fj.firmas::json, '{}'::json),
+        'generadoEn', now()
+      ) AS reporte
+      FROM adicion_base ab
+      LEFT JOIN institucion_base ib ON true
+      LEFT JOIN tipo_documento_base tdb ON tdb.id = ab.id
+      LEFT JOIN acto_base ato ON ato.id = ab.id
+      LEFT JOIN totales t ON true
+      LEFT JOIN firmas_json fj ON true
+    `;
+
+    const result = await this.dataSource.query(sql, [
+      comprobanteId,
+      normalizedNit,
+      daneSede,
+    ]);
+    const reporte = result?.[0]?.reporte;
+
+    if (!reporte) {
+      throw new NotFoundException(
+        `No se encontró el comprobante ${comprobanteId} para el NIT ${normalizedNit}.`,
+      );
+    }
+
+    return reporte as Record<string, unknown>;
+  }
+
   async getLiquidacionPresupuestalReporte(
     comprobanteId: number,
     nit: string,
@@ -443,8 +654,8 @@ export class ReportesRepository {
           COALESCE(SUM(valor_cdp_detalle), 0)::numeric(18,2) AS total_cdp_objeto
         FROM detalles_base
       )
-      SELECT jsonb_build_object(
-        'cabecera', jsonb_build_object(
+      SELECT json_build_object(
+        'cabecera', json_build_object(
           'cdpId', cb.id,
           'numeroComprobante', cb.numero_comprobante,
           'fecha', cb.fecha,
@@ -458,10 +669,9 @@ export class ReportesRepository {
           'totalCdpObjeto', t.total_cdp_objeto,
           'valorEnLetras', NULL
         ),
-        'firmas', COALESCE(fj.firmas, '{}'::jsonb),
         'detalles', COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object(
+          SELECT json_agg(
+            json_build_object(
               'detalleId', d.id,
               'fuenteFinanciacion', d.fuente_financiacion,
               'rubroId', d.rubro_gasto_id,
@@ -472,7 +682,8 @@ export class ReportesRepository {
             ORDER BY d.id
           )
           FROM detalles_base d
-        ), '[]'::jsonb),
+        ), '[]'::json),
+        'firmas', COALESCE(fj.firmas::json, '{}'::json),
         'generadoEn', now()
       ) AS reporte
       FROM cdp_base cb
@@ -649,8 +860,8 @@ export class ReportesRepository {
           COALESCE(SUM(valor_crp_detalle), 0)::numeric(18,2) AS total_crp
         FROM detalles_base
       )
-      SELECT jsonb_build_object(
-        'cabecera', jsonb_build_object(
+      SELECT json_build_object(
+        'cabecera', json_build_object(
           'crpId', cab.id,
           'numeroComprobante', cab.numero_crp,
           'fecha', cab.fecha,
@@ -669,8 +880,8 @@ export class ReportesRepository {
           'valorEnLetras', NULL
         ),
         'detalles', COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object(
+          SELECT json_agg(
+            json_build_object(
               'detalleId', d.id,
               'fuenteFinanciacion', d.fuente_financiacion,
               'rubroId', d.rubro_gastos_id,
@@ -681,8 +892,8 @@ export class ReportesRepository {
             ORDER BY d.id
           )
           FROM detalles_base d
-        ), '[]'::jsonb),
-        'firmas', COALESCE(fj.firmas, '{}'::jsonb),
+        ), '[]'::json),
+        'firmas', COALESCE(fj.firmas::json, '{}'::json),
         'generadoEn', now()
       ) AS reporte
       FROM cabecera_base cab

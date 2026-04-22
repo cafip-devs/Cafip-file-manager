@@ -5,6 +5,7 @@ import { ReportesService } from './reportes.service';
 describe('ReportesService', () => {
   let service: ReportesService;
   const reportesRepository = {
+    getAdicionReporte: jest.fn(),
     getLiquidacionPresupuestalReporte: jest.fn(),
     getCdpReporte: jest.fn(),
     getCrpReporte: jest.fn(),
@@ -25,9 +26,45 @@ describe('ReportesService', () => {
     service = moduleRef.get(ReportesService);
   });
 
+  it('delegates the adicion reporte query to the repository', async () => {
+    const expected = {
+      cabecera: {
+        adicionId: 1,
+        nit: '806013548',
+        totalAdicion: '1000000.00',
+        fecha: '2026-03-29T19:00:00',
+      },
+      detalles: [],
+      firmas: {},
+      generadoEn: '2026-04-22T11:00:00',
+    };
+    reportesRepository.getAdicionReporte.mockResolvedValue(expected);
+
+    const result = await service.getAdicionReporte({
+      comprobanteId: 1,
+      nit: '806013548',
+      daneSede: '113052000431',
+    });
+
+    expect(reportesRepository.getAdicionReporte).toHaveBeenCalledWith(
+      1,
+      '806013548',
+      '113052000431',
+    );
+    expect(result).toEqual({
+      ...expected,
+      cabecera: {
+        ...expected.cabecera,
+        fecha: '29 de marzo del 2026',
+        valorEnLetras: 'UN MILLON PESOS',
+      },
+      generadoEn: '22 de abril del 2026',
+    });
+  });
+
   it('delegates the liquidacion reporte query to the repository', async () => {
     const expected = {
-      cabecera: { id: 45, nit: '123456789' },
+      cabecera: { id: 45, nit: '123456789', fecha: '2026-03-29T19:00:00' },
       ingresos: [],
       gastos: [],
       firmas: {},
@@ -45,14 +82,26 @@ describe('ReportesService', () => {
     expect(
       reportesRepository.getLiquidacionPresupuestalReporte,
     ).toHaveBeenCalledWith(45, '123456789', '123456789012');
-    expect(result).toBe(expected);
+    expect(result).toEqual({
+      ...expected,
+      cabecera: {
+        ...expected.cabecera,
+        fecha: '29 de marzo del 2026',
+      },
+    });
   });
 
   it('delegates the cdp reporte query to the repository', async () => {
     const expected = {
-      cabecera: { cdpId: 40, nit: '123456789', totalCdpObjeto: '25000000.00' },
+      cabecera: {
+        cdpId: 40,
+        nit: '123456789',
+        totalCdpObjeto: '25000000.00',
+        fecha: '2026-03-29T19:00:00',
+      },
       detalles: [],
       firmas: {},
+      generadoEn: '2026-04-22T11:00:00',
     };
     reportesRepository.getCdpReporte.mockResolvedValue(expected);
 
@@ -71,16 +120,24 @@ describe('ReportesService', () => {
       ...expected,
       cabecera: {
         ...expected.cabecera,
-        valorEnLetras: 'veinticinco millones pesos con 00/100 m/cte',
+        fecha: '29 de marzo del 2026',
+        valorEnLetras: 'VEINTICINCO MILLONES PESOS',
       },
+      generadoEn: '22 de abril del 2026',
     });
   });
 
   it('delegates the crp reporte query to the repository', async () => {
     const expected = {
-      cabecera: { crpId: 43, nit: '806013548', totalCrp: '1000000.00' },
+      cabecera: {
+        crpId: 43,
+        nit: '806013548',
+        totalCrp: '1000000.00',
+        fecha: '2026-03-29T19:00:00',
+      },
       detalles: [],
       firmas: {},
+      generadoEn: '2026-04-22T11:00:00',
     };
     reportesRepository.getCrpReporte.mockResolvedValue(expected);
 
@@ -99,8 +156,10 @@ describe('ReportesService', () => {
       ...expected,
       cabecera: {
         ...expected.cabecera,
-        valorEnLetras: 'un millon pesos con 00/100 m/cte',
+        fecha: '29 de marzo del 2026',
+        valorEnLetras: 'UN MILLON PESOS',
       },
+      generadoEn: '22 de abril del 2026',
     });
   });
 });
