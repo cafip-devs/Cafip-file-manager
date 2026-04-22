@@ -8,6 +8,7 @@ describe('ReportesService', () => {
     getAdicionReporte: jest.fn(),
     getLiquidacionPresupuestalReporte: jest.fn(),
     getReduccionReporte: jest.fn(),
+    getTrasladoReporte: jest.fn(),
     getCdpReporte: jest.fn(),
     getCrpReporte: jest.fn(),
   };
@@ -123,6 +124,42 @@ describe('ReportesService', () => {
         ...expected.cabecera,
         fecha: '29 de marzo del 2026',
         valorEnLetras: 'UN MILLON QUINIENTOS MIL PESOS',
+      },
+      generadoEn: '22 de abril del 2026',
+    });
+  });
+
+  it('delegates the traslado reporte query to the repository', async () => {
+    const expected = {
+      cabecera: {
+        trasladoId: 3,
+        nit: '806013548',
+        totalTraslado: '1200000.00',
+        fecha: '2026-03-29T19:00:00',
+      },
+      detalles: [],
+      firmas: {},
+      generadoEn: '2026-04-22T11:00:00',
+    };
+    reportesRepository.getTrasladoReporte.mockResolvedValue(expected);
+
+    const result = await service.getTrasladoReporte({
+      comprobanteId: 3,
+      nit: '806013548',
+      daneSede: '113052000431',
+    });
+
+    expect(reportesRepository.getTrasladoReporte).toHaveBeenCalledWith(
+      3,
+      '806013548',
+      '113052000431',
+    );
+    expect(result).toEqual({
+      ...expected,
+      cabecera: {
+        ...expected.cabecera,
+        fecha: '29 de marzo del 2026',
+        valorEnLetras: 'UN MILLON DOSCIENTOS MIL PESOS',
       },
       generadoEn: '22 de abril del 2026',
     });

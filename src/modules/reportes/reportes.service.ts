@@ -4,6 +4,7 @@ import { GetCdpReporteDto } from './dto/get-cdp-reporte.dto';
 import { GetCrpReporteDto } from './dto/get-crp-reporte.dto';
 import { GetLiquidacionPresupuestalReporteDto } from './dto/get-liquidacion-presupuestal-reporte.dto';
 import { GetReduccionReporteDto } from './dto/get-reduccion-reporte.dto';
+import { GetTrasladoReporteDto } from './dto/get-traslado-reporte.dto';
 import { ReportesRepository } from './reportes.repository';
 import { formatearFechasReporte } from './utils/formato-fecha.util';
 import { numeroAPesosEnLetras } from './utils/numero-a-letras.util';
@@ -60,6 +61,27 @@ export class ReportesService {
     if (cabecera) {
       cabecera.valorEnLetras = numeroAPesosEnLetras(
         totalReduccion as number | string | null | undefined,
+      ).toUpperCase();
+    }
+
+    return formatearFechasReporte(reporte);
+  }
+
+  async getTrasladoReporte(
+    filters: GetTrasladoReporteDto,
+  ): Promise<Record<string, unknown>> {
+    const reporte = await this.reportesRepository.getTrasladoReporte(
+      filters.comprobanteId,
+      filters.nit,
+      filters.daneSede,
+    );
+
+    const cabecera = reporte.cabecera as Record<string, unknown> | undefined;
+    const totalTraslado = cabecera?.totalTraslado;
+
+    if (cabecera) {
+      cabecera.valorEnLetras = numeroAPesosEnLetras(
+        totalTraslado as number | string | null | undefined,
       ).toUpperCase();
     }
 

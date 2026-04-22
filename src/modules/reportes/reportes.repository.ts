@@ -737,6 +737,215 @@ export class ReportesRepository {
     return reporte as Record<string, unknown>;
   }
 
+  async getTrasladoReporte(
+    comprobanteId: number,
+    nit: string,
+    daneSede: string,
+  ): Promise<Record<string, unknown>> {
+    if (!this.dataSource) {
+      throw new ServiceUnavailableException(
+        'La conexión a PostgreSQL no está configurada. Define PG_USER, PG_HOST, PG_NAME, PG_PASSWORD, PG_PORT o DATABASE_URL para consultar reportes.',
+      );
+    }
+
+    const normalizedNit = nit.replace(/\D/g, '');
+    if (!normalizedNit) {
+      throw new BadRequestException('No fue posible interpretar el NIT enviado.');
+    }
+
+    const sql = `
+      WITH traslado_base AS (
+        SELECT
+          ct.id,
+          ct.numero_comprobante,
+          ct.fecha,
+          ct.tipo_documento_id,
+          ct.acto_administrativo_id,
+          ct.descripcion,
+          ct.estado,
+          regexp_replace(ct.institucion::text, '[^0-9]', '', 'g') AS nit
+        FROM comprobante_traslado ct
+        WHERE ct.id = $1
+          AND regexp_replace(ct.institucion::text, '[^0-9]', '', 'g') = $2
+      ),
+      firmas_ranked AS (
+        SELECT
+          tf.*,
+          row_number() OVER (
+            PARTITION BY tf.tipo_firma
+            ORDER BY tf.id DESC
+          ) AS rn
+        FROM traslado_firma tf
+        JOIN traslado_base tb
+          ON tb.id = tf.comprobante_id
+      ),
+      firmas_json AS (
+        SELECT jsonb_build_object(
+          'rector',
+          (
+            SELECT jsonb_build_object(
+              'nombre', fr.nombre,
+              'cargo', fr.cargo,
+              'archivoUrl', fr.archivo_url
+            )
+            FROM firmas_ranked fr
+            WHERE fr.tipo_firma = 'APROBADO' AND fr.rn = 1
+          )
+        ) AS firmas
+      ),
+      institucion_base AS (
+        SELECT
+          tb.nit,
+          COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion,
+          COALESCE(ccip.dane_pri, $3::text) AS dane,
+          COALESCE(ccip.email, cep.email) AS email,
+          cep.municipio,
+          ccdp.departamento
+        FROM traslado_base tb
+        LEFT JOIN LATERAL (
+          SELECT ccip.institucion_educativa, ccip.dane_pri, ccip.email
+          FROM catalogo_correo_institucional_privada ccip
+          WHERE ccip.dane_pri = $3
+            AND COALESCE(ccip.estado, 'ACTIVO') = 'ACTIVO'
+          ORDER BY ccip.id DESC
+          LIMIT 1
+        ) ccip ON true
+        LEFT JOIN LATERAL (
+          SELECT cep.nombre_establecimiento, cep.email, cep.municipio
+          FROM catalogo_entidades_privada cep
+          WHERE regexp_replace(cep.nit_fse, '[^0-9]', '', 'g') = tb.nit
+          ORDER BY cep.id DESC
+          LIMIT 1
+        ) cep ON true
+        LEFT JOIN LATERAL (
+          SELECT ccdp.departamento
+          FROM catalogo_ciudades_departamentos_privada ccdp
+          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          ORDER BY ccdp.id DESC
+          LIMIT 1
+        ) ccdp ON true
+      ),
+      tipo_documento_base AS (
+        SELECT
+          tb.id,
+          cds.documento_soporte AS tipo_documento_nombre
+        FROM traslado_base tb
+        LEFT JOIN catalogo_documentos_soporte_publica cds
+          ON cds.id = tb.tipo_documento_id
+      ),
+      acto_base AS (
+        SELECT
+          tb.id,
+          trim(
+            concat_ws(
+              ' ',
+              nullif(trim(cap.tipo_documento), ''),
+              CASE
+                WHEN nullif(trim(aa.numero_acto), '') IS NULL THEN NULL
+                WHEN cap.tipo_documento ~* '\\mno\\.?\\M'
+                  OR aa.numero_acto ~* '\\mno\\.?\\M'
+                THEN trim(aa.numero_acto)
+                ELSE concat('No. ', trim(aa.numero_acto))
+              END,
+              CASE
+                WHEN aa.fecha IS NULL THEN NULL
+                ELSE concat('del ', to_char(aa.fecha, 'DD/MM/YYYY'))
+              END
+            )
+          ) AS acto_administrativo
+        FROM traslado_base tb
+        LEFT JOIN acto_administrativo aa
+          ON aa.id = tb.acto_administrativo_id
+        LEFT JOIN catalogo_actos_administrativos_privada cap
+          ON cap.id = aa.tipo_acto_administrativo_id
+      ),
+      detalles_base AS (
+        SELECT
+          d.id,
+          ff.nombre_fuente AS fuente_financiacion,
+          d.rubro_gasto_id AS rubro_id,
+          cg.cuenta AS rubro_cuenta,
+          cg.concepto AS rubro_concepto,
+          CASE
+            WHEN COALESCE(d.valor_contracredito, 0) > 0 THEN 'CONTRACREDITO'
+            ELSE 'CREDITO'
+          END AS tipo,
+          COALESCE(d.valor_credito, d.valor_contracredito, 0)::numeric(18,2) AS valor_traslado
+        FROM comprobante_traslado_sede d
+        JOIN traslado_base tb
+          ON tb.id = d.comprobante_id
+        LEFT JOIN catalogo_fuentes_financiacion_publica ff
+          ON ff.id = d.fuente_financiacion_id
+        LEFT JOIN catalogo_gastos_publica cg
+          ON cg.id = d.rubro_gasto_id
+      ),
+      totales AS (
+        SELECT
+          COALESCE(SUM(valor_traslado), 0)::numeric(18,2) AS total_traslado
+        FROM detalles_base
+      )
+      SELECT json_build_object(
+        'cabecera', json_build_object(
+          'trasladoId', tb.id,
+          'numeroComprobante', tb.numero_comprobante,
+          'fecha', tb.fecha,
+          'institucion', ib.institucion,
+          'nit', ib.nit,
+          'dane', ib.dane,
+          'email', ib.email,
+          'municipio', ib.municipio,
+          'departamento', ib.departamento,
+          'tipoDocumentoId', tb.tipo_documento_id,
+          'tipoDocumentoNombre', tdb.tipo_documento_nombre,
+          'actoAdministrativoId', tb.acto_administrativo_id,
+          'actoAdministrativo', ato.acto_administrativo,
+          'descripcion', tb.descripcion,
+          'estado', tb.estado,
+          'totalTraslado', t.total_traslado,
+          'valorEnLetras', NULL
+        ),
+        'detalles', COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'detalleId', d.id,
+              'fuenteFinanciacion', d.fuente_financiacion,
+              'rubroId', d.rubro_id,
+              'rubroCuenta', d.rubro_cuenta,
+              'rubroConcepto', d.rubro_concepto,
+              'tipo', d.tipo,
+              'valorTraslado', d.valor_traslado
+            )
+            ORDER BY d.id
+          )
+          FROM detalles_base d
+        ), '[]'::json),
+        'firmas', COALESCE(fj.firmas::json, '{}'::json),
+        'generadoEn', now()
+      ) AS reporte
+      FROM traslado_base tb
+      LEFT JOIN institucion_base ib ON true
+      LEFT JOIN tipo_documento_base tdb ON tdb.id = tb.id
+      LEFT JOIN acto_base ato ON ato.id = tb.id
+      LEFT JOIN totales t ON true
+      LEFT JOIN firmas_json fj ON true
+    `;
+
+    const result = await this.dataSource.query(sql, [
+      comprobanteId,
+      normalizedNit,
+      daneSede,
+    ]);
+    const reporte = result?.[0]?.reporte;
+
+    if (!reporte) {
+      throw new NotFoundException(
+        `No se encontró el comprobante ${comprobanteId} para el NIT ${normalizedNit}.`,
+      );
+    }
+
+    return reporte as Record<string, unknown>;
+  }
+
   async getCdpReporte(
     comprobanteId: number,
     nit: string,
