@@ -43,6 +43,15 @@ export class ReportesService {
       filters.daneSede,
     );
 
+    const cabecera = reporte.cabecera as Record<string, unknown> | undefined;
+    const totalIngreso = cabecera?.totalIngreso;
+
+    if (cabecera) {
+      cabecera.valorEnLetras = numeroAPesosEnLetras(
+        totalIngreso as number | string | null | undefined,
+      ).toUpperCase();
+    }
+
     return formatearFechasReporte(reporte);
   }
 
