@@ -146,7 +146,14 @@ export class ReportesRepository {
             NULLIF(trim(ci.cod_detalle), ''),
             NULLIF(trim(cg.cod_detalle), '')
           ) AS rubro_cuenta,
-          COALESCE(ci.concepto, cg.concepto) AS rubro_concepto,
+          COALESCE(
+            NULLIF(trim(ci.detalle), ''),
+            NULLIF(trim(ci.concepto), ''),
+            NULLIF(trim(ci.cod_detalle), ''),
+            NULLIF(trim(cg.detalle), ''),
+            NULLIF(trim(cg.concepto), ''),
+            NULLIF(trim(cg.cod_detalle), '')
+          ) AS rubro_concepto,
           CASE
             WHEN d.rubro_ingreso_id IS NOT NULL THEN 'INGRESO'
             ELSE 'GASTO'
@@ -390,6 +397,7 @@ export class ReportesRepository {
           cip.id AS rubro_id,
           NULLIF(trim(cip.cod_detalle), '') AS cuenta,
           COALESCE(
+            NULLIF(trim(cip.detalle), ''),
             NULLIF(trim(cip.concepto), ''),
             NULLIF(trim(cip.cod_detalle), '')
           ) AS concepto,
@@ -427,7 +435,7 @@ export class ReportesRepository {
           NULL::int AS rubro_id,
           ip.cuenta,
           COALESCE(
-            MAX(NULLIF(trim(cip.concepto), '')),
+            il.concepto,
             ip.cuenta
           ) AS concepto,
           COALESCE((
@@ -437,9 +445,24 @@ export class ReportesRepository {
                OR ic2.cuenta LIKE ip.cuenta || '.%'
           ), 0)::numeric(18,2) AS total
         FROM ingresos_prefijos ip
-        LEFT JOIN catalogo_ingresos_publica cip
-          ON NULLIF(trim(cip.cod_detalle), '') = ip.cuenta
-        GROUP BY ip.cuenta
+        LEFT JOIN LATERAL (
+          SELECT
+            CASE array_length(regexp_split_to_array(ip.cuenta, '\\.'), 1)
+              WHEN 1 THEN NULLIF(trim(cip.concepto), '')
+              WHEN 2 THEN NULLIF(trim(cip.tipo), '')
+              WHEN 3 THEN NULLIF(trim(cip.clase), '')
+              WHEN 4 THEN NULLIF(trim(cip.seccion), '')
+              WHEN 5 THEN NULLIF(trim(cip.subclase), '')
+              ELSE NULLIF(trim(cip.detalle), '')
+            END AS concepto
+          FROM catalogo_ingresos_publica cip
+          JOIN comprobante_base cb
+            ON regexp_replace(cip.nit, '[^0-9]', '', 'g') = cb.nit
+          WHERE NULLIF(trim(cip.cod_detalle), '') = ip.cuenta
+             OR NULLIF(trim(cip.cod_detalle), '') LIKE ip.cuenta || '.%'
+          ORDER BY length(cip.cod_detalle), cip.cod_detalle
+          LIMIT 1
+        ) il ON true
       ),
       gastos_movimientos AS (
         SELECT
@@ -454,6 +477,7 @@ export class ReportesRepository {
           cgp.id AS rubro_id,
           NULLIF(trim(cgp.cod_detalle), '') AS cuenta,
           COALESCE(
+            NULLIF(trim(cgp.detalle), ''),
             NULLIF(trim(cgp.concepto), ''),
             NULLIF(trim(cgp.cod_detalle), '')
           ) AS concepto,
@@ -491,7 +515,7 @@ export class ReportesRepository {
           NULL::int AS rubro_id,
           gp.cuenta,
           COALESCE(
-            MAX(NULLIF(trim(cgp.concepto), '')),
+            gl.concepto,
             gp.cuenta
           ) AS concepto,
           COALESCE((
@@ -501,9 +525,24 @@ export class ReportesRepository {
                OR gc2.cuenta LIKE gp.cuenta || '.%'
           ), 0)::numeric(18,2) AS total
         FROM gastos_prefijos gp
-        LEFT JOIN catalogo_gastos_publica cgp
-          ON NULLIF(trim(cgp.cod_detalle), '') = gp.cuenta
-        GROUP BY gp.cuenta
+        LEFT JOIN LATERAL (
+          SELECT
+            CASE array_length(regexp_split_to_array(gp.cuenta, '\\.'), 1)
+              WHEN 1 THEN NULLIF(trim(cgp.concepto), '')
+              WHEN 2 THEN NULLIF(trim(cgp.tipo), '')
+              WHEN 3 THEN NULLIF(trim(cgp.clase), '')
+              WHEN 4 THEN NULLIF(trim(cgp.seccion), '')
+              WHEN 5 THEN NULLIF(trim(cgp.subclase), '')
+              ELSE NULLIF(trim(cgp.detalle), '')
+            END AS concepto
+          FROM catalogo_gastos_publica cgp
+          JOIN comprobante_base cb
+            ON regexp_replace(cgp.nit, '[^0-9]', '', 'g') = cb.nit
+          WHERE NULLIF(trim(cgp.cod_detalle), '') = gp.cuenta
+             OR NULLIF(trim(cgp.cod_detalle), '') LIKE gp.cuenta || '.%'
+          ORDER BY length(cgp.cod_detalle), cgp.cod_detalle
+          LIMIT 1
+        ) gl ON true
       ),
       totales_generales AS (
         SELECT
@@ -710,7 +749,14 @@ export class ReportesRepository {
             NULLIF(trim(ci.cod_detalle), ''),
             NULLIF(trim(cg.cod_detalle), '')
           ) AS rubro_cuenta,
-          COALESCE(ci.concepto, cg.concepto) AS rubro_concepto,
+          COALESCE(
+            NULLIF(trim(ci.detalle), ''),
+            NULLIF(trim(ci.concepto), ''),
+            NULLIF(trim(ci.cod_detalle), ''),
+            NULLIF(trim(cg.detalle), ''),
+            NULLIF(trim(cg.concepto), ''),
+            NULLIF(trim(cg.cod_detalle), '')
+          ) AS rubro_concepto,
           CASE
             WHEN d.rubro_ingreso_id IS NOT NULL THEN 'INGRESO'
             ELSE 'GASTO'
@@ -921,7 +967,11 @@ export class ReportesRepository {
           ff.nombre_fuente AS fuente_financiacion,
           d.rubro_gasto_id AS rubro_id,
           NULLIF(trim(cg.cod_detalle), '') AS rubro_cuenta,
-          cg.concepto AS rubro_concepto,
+          COALESCE(
+            NULLIF(trim(cg.detalle), ''),
+            NULLIF(trim(cg.concepto), ''),
+            NULLIF(trim(cg.cod_detalle), '')
+          ) AS rubro_concepto,
           CASE
             WHEN COALESCE(d.valor_contracredito, 0) > 0 THEN 'CONTRACREDITO'
             ELSE 'CREDITO'
@@ -1115,7 +1165,11 @@ export class ReportesRepository {
           f.nombre_fuente AS fuente_financiacion,
           d.rubro_gasto_id,
           NULLIF(trim(g.cod_detalle), '') AS rubro_cuenta,
-          g.concepto AS rubro_concepto,
+          COALESCE(
+            NULLIF(trim(g.detalle), ''),
+            NULLIF(trim(g.concepto), ''),
+            NULLIF(trim(g.cod_detalle), '')
+          ) AS rubro_concepto,
           d.valor_cdp::numeric(18,2) AS valor_cdp_detalle
         FROM cdp_detalle d
         JOIN cdp_base cb
@@ -1321,7 +1375,11 @@ export class ReportesRepository {
           ff.nombre_fuente AS fuente_financiacion,
           d.rubro_gastos_id,
           NULLIF(trim(cg.cod_detalle), '') AS rubro_cuenta,
-          cg.concepto AS rubro_concepto,
+          COALESCE(
+            NULLIF(trim(cg.detalle), ''),
+            NULLIF(trim(cg.concepto), ''),
+            NULLIF(trim(cg.cod_detalle), '')
+          ) AS rubro_concepto,
           d.valor_crp::numeric(18,2) AS valor_crp_detalle
         FROM crp_detalles d
         JOIN crp_base cb
