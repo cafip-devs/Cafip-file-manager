@@ -251,6 +251,7 @@ export class ReportesRepository {
           cp.id,
           cp.numero_comprobante,
           cp.fecha,
+          cp.acto_administrativo_id,
           EXTRACT(YEAR FROM cp.fecha)::int AS vigencia,
           regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') AS nit
         FROM comprobante_presupuestal cp
@@ -336,6 +337,32 @@ export class ReportesRepository {
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
+      ),
+      acto_base AS (
+        SELECT
+          cb.id,
+          trim(
+            concat_ws(
+              ' ',
+              nullif(trim(cap.tipo_documento), ''),
+              CASE
+                WHEN nullif(trim(aa.numero_acto), '') IS NULL THEN NULL
+                WHEN cap.tipo_documento ~* '\\mno\\.?\\M'
+                  OR aa.numero_acto ~* '\\mno\\.?\\M'
+                THEN trim(aa.numero_acto)
+                ELSE concat('No. ', trim(aa.numero_acto))
+              END,
+              CASE
+                WHEN aa.fecha IS NULL THEN NULL
+                ELSE concat('del ', to_char(aa.fecha, 'DD/MM/YYYY'))
+              END
+            )
+          ) AS acto_administrativo
+        FROM comprobante_base cb
+        LEFT JOIN acto_administrativo aa
+          ON aa.id = cb.acto_administrativo_id
+        LEFT JOIN catalogo_actos_administrativos_privada cap
+          ON cap.id = aa.tipo_acto_administrativo_id
       ),
       detalles_vigencia AS (
         SELECT
@@ -477,12 +504,19 @@ export class ReportesRepository {
         LEFT JOIN catalogo_gastos_publica cgp
           ON NULLIF(trim(cgp.cod_detalle), '') = gp.cuenta
         GROUP BY gp.cuenta
+      ),
+      totales_generales AS (
+        SELECT
+          COALESCE(SUM(ic.total), 0)::numeric(18,2) AS total_ingreso
+        FROM ingresos_catalogo ic
       )
       SELECT json_build_object(
         'cabecera', json_build_object(
           'id', cb.id,
           'numeroComprobante', cb.numero_comprobante,
           'fecha', cb.fecha,
+          'actoAdministrativoId', cb.acto_administrativo_id,
+          'actoAdministrativo', ato.acto_administrativo,
           'vigencia', cb.vigencia,
           'nit', cb.nit,
           'institucionEducativa', ib.institucion_educativa,
@@ -490,6 +524,8 @@ export class ReportesRepository {
           'email', ib.email,
           'municipio', ib.municipio,
           'departamento', ib.departamento,
+          'totalIngreso', tg.total_ingreso,
+          'valorEnLetras', NULL,
           'generadoEn', now()
         ),
         'ingresos', COALESCE((
@@ -522,7 +558,9 @@ export class ReportesRepository {
       ) AS reporte
       FROM comprobante_base cb
       LEFT JOIN institucion_base ib ON true
+      LEFT JOIN acto_base ato ON ato.id = cb.id
       LEFT JOIN firmas_json fj ON true
+      LEFT JOIN totales_generales tg ON true
     `;
 
     const result = await this.dataSource.query(sql, [

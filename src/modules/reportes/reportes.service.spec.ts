@@ -66,7 +66,13 @@ describe('ReportesService', () => {
 
   it('delegates the liquidacion reporte query to the repository', async () => {
     const expected = {
-      cabecera: { id: 45, nit: '123456789', fecha: '2026-03-29T19:00:00' },
+      cabecera: {
+        id: 45,
+        nit: '123456789',
+        fecha: '2026-03-29T19:00:00',
+        actoAdministrativo: 'ACUERDO No. 007 del 25/10/2024',
+        totalIngreso: '46366740.00',
+      },
       ingresos: [],
       gastos: [],
       firmas: {},
@@ -89,6 +95,7 @@ describe('ReportesService', () => {
       cabecera: {
         ...expected.cabecera,
         fecha: '29 de marzo del 2026',
+        valorEnLetras: 'CUARENTA Y SEIS MILLONES TRESCIENTOS SESENTA Y SEIS MIL SETECIENTOS CUARENTA PESOS',
       },
     });
   });
