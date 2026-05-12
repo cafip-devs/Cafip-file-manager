@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { REPORTES_DATA_SOURCE } from '../../database/reportes-data-source.provider';
+import { valorCdpEnLetrasMcte } from './utils/numero-a-letras.util';
 
 @Injectable()
 export class ReportesRepository {
@@ -260,10 +261,11 @@ export class ReportesRepository {
           cp.fecha,
           cp.acto_administrativo_id,
           EXTRACT(YEAR FROM cp.fecha)::int AS vigencia,
-          regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') AS nit
+          regexp_replace(coalesce(cp.institucion::text, ''), '[^0-9]', '', 'g') AS nit
         FROM comprobante_presupuestal cp
         WHERE cp.id = $1
-          AND regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') = $2
+          AND regexp_replace(coalesce(cp.institucion::text, ''), '[^0-9]', '', 'g')
+            = regexp_replace($2::text, '[^0-9]', '', 'g')
       ),
       firmas_ranked AS (
         SELECT
@@ -380,9 +382,11 @@ export class ReportesRepository {
         JOIN comprobante_presupuestal cp
           ON cp.id = cas.comprobante_id
         JOIN comprobante_base cb
-          ON regexp_replace(cp.institucion::text, '[^0-9]', '', 'g') = cb.nit
-         AND EXTRACT(YEAR FROM cp.fecha)::int = cb.vigencia
-        WHERE cp.estado = 'APROBADO'
+          ON EXTRACT(YEAR FROM cp.fecha)::int = cb.vigencia
+         AND regexp_replace(coalesce(cp.institucion::text, ''), '[^0-9]', '', 'g') = cb.nit
+        WHERE
+          cp.id = cb.id
+          OR upper(trim(coalesce(cp.estado, ''))) IN ('APROBADO', 'PROYECTO')
       ),
       ingresos_movimientos AS (
         SELECT
@@ -607,7 +611,16 @@ export class ReportesRepository {
       normalizedNit,
       daneSede,
     ]);
-    const reporte = result?.[0]?.reporte;
+    let reporte = result?.[0]?.reporte;
+    if (typeof reporte === 'string') {
+      try {
+        reporte = JSON.parse(reporte) as Record<string, unknown>;
+      } catch {
+        throw new BadRequestException(
+          'La respuesta del reporte no pudo interpretarse como JSON.',
+        );
+      }
+    }
 
     if (!reporte) {
       throw new NotFoundException(
@@ -1076,7 +1089,8 @@ export class ReportesRepository {
           c.fecha,
           c.institucion_id,
           c.estado,
-          c.objeto
+          c.objeto,
+          c.año
         FROM cdp c
         WHERE c.id = $1
           AND regexp_replace(c.institucion_id::text, '[^0-9]', '', 'g') = $2
@@ -1188,7 +1202,7 @@ export class ReportesRepository {
         'cabecera', json_build_object(
           'cdpId', cb.id,
           'numeroComprobante', cb.numero_comprobante,
-          'fecha', cb.fecha,
+          'fecha', to_char(cb.fecha::date, 'YYYY-MM-DD'),
           'objeto', cb.objeto,
           'institucion', ib.institucion_educativa,
           'nit', ib.nit,
@@ -1197,6 +1211,7 @@ export class ReportesRepository {
           'municipio', ib.municipio,
           'departamento', ib.departamento,
           'totalCdpObjeto', t.total_cdp_objeto,
+          'vigencia', cb.año,
           'valorEnLetras', NULL
         ),
         'detalles', COALESCE((
@@ -1233,6 +1248,14 @@ export class ReportesRepository {
       throw new NotFoundException(
         `No se encontró el comprobante ${comprobanteId} para el NIT ${normalizedNit}.`,
       );
+    }
+
+    const cabecera = (reporte as Record<string, unknown>).cabecera as
+      | Record<string, unknown>
+      | undefined;
+    if (cabecera) {
+      const total = Number(cabecera.totalCdpObjeto ?? 0);
+      cabecera.valorEnLetras = valorCdpEnLetrasMcte(total);
     }
 
     return reporte as Record<string, unknown>;

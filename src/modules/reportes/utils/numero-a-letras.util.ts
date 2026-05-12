@@ -124,7 +124,7 @@ function convertirEntero(numero: number): string {
   const centenas = numero % 1_000;
 
   const partes = [
-    convertirSeccion(millones, 'un millon', 'millones'),
+    convertirSeccion(millones, 'un millón', 'millones'),
     miles === 1 ? 'mil' : convertirSeccion(miles, 'mil', 'mil'),
     convertirCentenas(centenas),
   ].filter(Boolean);
@@ -151,4 +151,22 @@ export function numeroAPesosEnLetras(value: number | string | null | undefined):
   }
 
   return `${letras} pesos con ${convertirEntero(centavos)} centavos`;
+}
+
+/** Texto del valor del CDP en letras para el PDF (mayúsculas, moneda corriente). */
+export function valorCdpEnLetrasMcte(
+  value: number | string | null | undefined,
+): string {
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : Number.parseFloat(String(value ?? '0').replace(/,/g, ''));
+
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return '';
+  }
+
+  const entero = Math.floor(numericValue);
+  const letras = convertirEntero(entero);
+  return `${letras.toUpperCase()} DE PESOS M/CTE.`;
 }
