@@ -78,7 +78,7 @@ export class ReportesRepository {
           COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion,
           COALESCE(ccip.dane_pri, $3::text) AS dane,
           COALESCE(ccip.email, cep.email) AS email,
-          cep.municipio,
+          COALESCE(NULLIF(trim(ccdp.nombre_municipio), ''), cep.municipio) AS municipio,
           ccdp.departamento
         FROM adicion_base ab
         LEFT JOIN LATERAL (
@@ -97,9 +97,12 @@ export class ReportesRepository {
           LIMIT 1
         ) cep ON true
         LEFT JOIN LATERAL (
-          SELECT ccdp.departamento
+          SELECT ccdp.departamento, ccdp.nombre_municipio
           FROM catalogo_ciudades_departamentos_privada ccdp
-          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          WHERE ccdp.codigo_municipio = substring(
+            regexp_replace(coalesce($3::text, ''), '[^0-9]', '', 'g')
+            FROM 2 FOR 5
+          )
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
@@ -321,7 +324,7 @@ export class ReportesRepository {
           COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion_educativa,
           COALESCE(ccip.dane_pri, $3::text) AS dane_pri,
           COALESCE(ccip.email, cep.email) AS email,
-          cep.municipio,
+          COALESCE(NULLIF(trim(ccdp.nombre_municipio), ''), cep.municipio) AS municipio,
           ccdp.departamento
         FROM comprobante_base cb
         LEFT JOIN LATERAL (
@@ -340,9 +343,12 @@ export class ReportesRepository {
           LIMIT 1
         ) cep ON true
         LEFT JOIN LATERAL (
-          SELECT ccdp.departamento
+          SELECT ccdp.departamento, ccdp.nombre_municipio
           FROM catalogo_ciudades_departamentos_privada ccdp
-          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          WHERE ccdp.codigo_municipio = substring(
+            regexp_replace(coalesce($3::text, ''), '[^0-9]', '', 'g')
+            FROM 2 FOR 5
+          )
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
@@ -693,7 +699,7 @@ export class ReportesRepository {
           COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion,
           COALESCE(ccip.dane_pri, $3::text) AS dane,
           COALESCE(ccip.email, cep.email) AS email,
-          cep.municipio,
+          COALESCE(NULLIF(trim(ccdp.nombre_municipio), ''), cep.municipio) AS municipio,
           ccdp.departamento
         FROM reduccion_base rb
         LEFT JOIN LATERAL (
@@ -712,9 +718,12 @@ export class ReportesRepository {
           LIMIT 1
         ) cep ON true
         LEFT JOIN LATERAL (
-          SELECT ccdp.departamento
+          SELECT ccdp.departamento, ccdp.nombre_municipio
           FROM catalogo_ciudades_departamentos_privada ccdp
-          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          WHERE ccdp.codigo_municipio = substring(
+            regexp_replace(coalesce($3::text, ''), '[^0-9]', '', 'g')
+            FROM 2 FOR 5
+          )
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
@@ -914,7 +923,7 @@ export class ReportesRepository {
           COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion,
           COALESCE(ccip.dane_pri, $3::text) AS dane,
           COALESCE(ccip.email, cep.email) AS email,
-          cep.municipio,
+          COALESCE(NULLIF(trim(ccdp.nombre_municipio), ''), cep.municipio) AS municipio,
           ccdp.departamento
         FROM traslado_base tb
         LEFT JOIN LATERAL (
@@ -933,9 +942,12 @@ export class ReportesRepository {
           LIMIT 1
         ) cep ON true
         LEFT JOIN LATERAL (
-          SELECT ccdp.departamento
+          SELECT ccdp.departamento, ccdp.nombre_municipio
           FROM catalogo_ciudades_departamentos_privada ccdp
-          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          WHERE ccdp.codigo_municipio = substring(
+            regexp_replace(coalesce($3::text, ''), '[^0-9]', '', 'g')
+            FROM 2 FOR 5
+          )
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
@@ -1146,7 +1158,7 @@ export class ReportesRepository {
           COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion_educativa,
           COALESCE(ccip.dane_pri, $3::text) AS dane_pri,
           COALESCE(ccip.email, cep.email) AS email,
-          cep.municipio,
+          COALESCE(NULLIF(trim(ccdp.nombre_municipio), ''), cep.municipio) AS municipio,
           ccdp.departamento
         FROM cdp_base cb
         LEFT JOIN LATERAL (
@@ -1166,9 +1178,12 @@ export class ReportesRepository {
           LIMIT 1
         ) cep ON true
         LEFT JOIN LATERAL (
-          SELECT ccdp.departamento
+          SELECT ccdp.departamento, ccdp.nombre_municipio
           FROM catalogo_ciudades_departamentos_privada ccdp
-          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          WHERE ccdp.codigo_municipio = substring(
+            regexp_replace(coalesce($3::text, ''), '[^0-9]', '', 'g')
+            FROM 2 FOR 5
+          )
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
@@ -1342,7 +1357,7 @@ export class ReportesRepository {
           COALESCE(ccip.institucion_educativa, cep.nombre_establecimiento) AS institucion,
           COALESCE(ccip.dane_pri, $3::text) AS dane,
           COALESCE(ccip.email, cep.email) AS email,
-          cep.municipio,
+          COALESCE(NULLIF(trim(ccdp.nombre_municipio), ''), cep.municipio) AS municipio,
           ccdp.departamento
         FROM crp_base cb
         LEFT JOIN LATERAL (
@@ -1361,9 +1376,12 @@ export class ReportesRepository {
           LIMIT 1
         ) cep ON true
         LEFT JOIN LATERAL (
-          SELECT ccdp.departamento
+          SELECT ccdp.departamento, ccdp.nombre_municipio
           FROM catalogo_ciudades_departamentos_privada ccdp
-          WHERE upper(trim(ccdp.nombre_municipio)) = upper(trim(cep.municipio))
+          WHERE ccdp.codigo_municipio = substring(
+            regexp_replace(coalesce($3::text, ''), '[^0-9]', '', 'g')
+            FROM 2 FOR 5
+          )
           ORDER BY ccdp.id DESC
           LIMIT 1
         ) ccdp ON true
